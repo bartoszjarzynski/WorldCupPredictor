@@ -1,3 +1,4 @@
+import os
 import streamlit as st
 import pandas as pd
 import numpy as np
@@ -17,18 +18,39 @@ st.write("Wprowadzaj swoje typy i śledź tabelę na żywo!")
 # 1. Połączenie z Supabase
 @st.cache_resource
 def get_supabase_client():
-    """Ustanawia połączenie z Supabase używając `st.secrets['supabase']`"""
+    """Ustanawia połączenie z Supabase używając `st.secrets['supabase']` lub zmiennych środowiskowych."""
     try:
-        supabase_secrets = st.secrets["supabase"]
-        url = supabase_secrets["url"]
-        key = supabase_secrets["anon_key"] if "anon_key" in supabase_secrets else supabase_secrets.get("key")
+        url = None
+        key = None
+
+        if "supabase" in st.secrets:
+            supabase_secrets = st.secrets["supabase"]
+            url = supabase_secrets.get("url")
+            key = supabase_secrets.get("anon_key") or supabase_secrets.get("key")
+
+        url = url or os.getenv("SUPABASE_URL")
+        key = key or os.getenv("SUPABASE_ANON_KEY") or os.getenv("SUPABASE_KEY")
+
         if not url or not key:
-            raise ValueError("Brakuje `url` lub `key` w sekcji `supabase` w secrets.toml`")
+            raise ValueError(
+                "Brakuje `url` lub `key` w konfiguracji Supabase. "
+                "Ustaw `supabase` w secrets.toml lub zmienne środowiskowe SUPABASE_URL i SUPABASE_ANON_KEY."
+            )
+
         client = create_client(url, key)
         return client
     except Exception as e:
         st.error(f"Błąd połączenia z Supabase: {e}")
-        st.info("Sprawdź czy plik `.streamlit/secrets.toml` zawiera poprawne klucze Supabase (url i anon_key/key).")
+        st.info(
+            "W Streamlit Cloud dodaj tajne dane w ustawieniach aplikacji: "
+            "https://streamlit.io/cloud/settings/secrets"
+        )
+        st.info(
+            "Format:\n"
+            "[supabase]\n"
+            "url = \"https://your-project-id.supabase.co\"\n"
+            "anon_key = \"your-anon-public-api-key\""
+        )
         return None
 
 
@@ -141,7 +163,10 @@ if df_mecze.empty:
 else:
     # Przygotowanie listy meczów do wyboru w formularzu
     # Pokazujemy tylko te mecze, które nie mają jeszcze wpisanego oficjalnego wyniku (czyli te, które można typować)
-    mecze_do_typowania = df_mecze[df_mecze["homeGoals"].isna() | (df_mecze["awayGoals"] == "")]
+    def is_empty_score(value):
+        return pd.isna(value) or str(value).strip() == ""
+
+    mecze_do_typowania = df_mecze[df_mecze["homeGoals"].apply(is_empty_score) | df_mecze["awayGoals"].apply(is_empty_score)]
     
     if mecze_do_typowania.empty:
         st.info("Wszystkie mecze z zakładki 'Mecze' zostały już rozegrane i uzupełnione!")

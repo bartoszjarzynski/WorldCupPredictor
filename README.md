@@ -34,6 +34,25 @@ Streamlit app for saving World Cup predictions to Supabase and showing a live le
    streamlit run app.py
    ```
 
+## Deploying to Streamlit Cloud
+
+Streamlit Cloud does not use your local `.streamlit/secrets.toml` file from GitHub. You must add the secret values in the app settings after deployment.
+
+1. Open your Streamlit Cloud app dashboard.
+2. Go to **Settings** -> **Secrets**.
+3. Paste:
+   ```toml
+   [supabase]
+   url = "https://your-project-id.supabase.co"
+   anon_key = "your-anon-public-api-key"
+   ```
+
+Alternatively you can set environment variables in Streamlit Cloud:
+- `SUPABASE_URL`
+- `SUPABASE_ANON_KEY`
+
+> If you see `st.secrets has no key "supabase"`, it means the secret is not configured in Streamlit Cloud.
+
 ## GitHub deployment
 
 1. Create a new GitHub repository for `worldCupPredictor`.

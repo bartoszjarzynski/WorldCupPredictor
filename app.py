@@ -166,8 +166,10 @@ else:
     def is_empty_score(value):
         return pd.isna(value) or str(value).strip() == ""
 
-    mecze_do_typowania = df_mecze[df_mecze["homeGoals"].apply(is_empty_score) | df_mecze["awayGoals"].apply(is_empty_score)]
-    
+    home_empty = df_mecze["homeGoals"].apply(is_empty_score)
+    away_empty = df_mecze["awayGoals"].apply(is_empty_score)
+    mecze_do_typowania = df_mecze[home_empty | away_empty].sort_values("id")
+
     if mecze_do_typowania.empty:
         st.info("Wszystkie mecze z zakładki 'Mecze' zostały już rozegrane i uzupełnione!")
     else:

@@ -33,15 +33,3 @@ Streamlit app for saving World Cup predictions to Supabase and showing a live le
    ```bash
    streamlit run app.py
    ```
-
-## GitHub deployment
-
-1. Create a new GitHub repository for `worldCupPredictor`.
-2. Add the remote and push the code:
-   ```bash
-   git remote add origin https://github.com/<your-username>/<repo-name>.git
-   git branch -M main
-   git push -u origin main
-   ```
-
-> Keep `.streamlit/secrets.toml` private. It is already excluded by `.gitignore`.

@@ -304,3 +304,28 @@ else:
         # Dodajemy kolumnę z pozycją (np. 1, 2, 3...)
         tabela_koncowa.index = tabela_koncowa.index + 1
         st.dataframe(tabela_koncowa, use_container_width=True)
+
+# --- SEKCJA 3: PRZEGLĄD TYPÓW KONKRETNEGO GRACZA ---
+st.header("🔍 Typy wybranego gracza")
+wybrany_gracz_do_podgladu = st.selectbox("Pokaż typy użytkownika:", [""] + LISTA_TYPEROW)
+
+if wybrany_gracz_do_podgladu:
+    if df_typy.empty:
+        st.info("Brak zapisanych typów w bazie danych.")
+    else:
+        df_user_typy = df_typy[df_typy["name"] == wybrany_gracz_do_podgladu].copy()
+        if df_user_typy.empty:
+            st.info(f"Użytkownik {wybrany_gracz_do_podgladu} jeszcze nie wprowadził typów.")
+        else:
+            # Dopełniamy do informacji o meczu z tabeli matches
+            df_user_typy = df_user_typy.rename(columns={"homeGoals": "pred_homeGoals", "awayGoals": "pred_awayGoals"})
+            df_user_typy = pd.merge(
+                df_user_typy,
+                df_mecze[["id", "home", "away"]],
+                on="id",
+                how="left",
+            )
+            df_user_typy["Mecz"] = df_user_typy.apply(lambda r: f"{r['home']} vs {r['away']}", axis=1)
+            df_user_typy["Typ"] = df_user_typy.apply(lambda r: f"{int(r['pred_homeGoals'])}-{int(r['pred_awayGoals'])}", axis=1)
+            df_user_typy = df_user_typy[["id", "Mecz", "Typ"]].sort_values("id")
+            st.table(df_user_typy.rename(columns={"id": "Mecz ID"}))

@@ -4,16 +4,25 @@ import pandas as pd
 import numpy as np
 from supabase import create_client
 import json
+import bcrypt
+import hashlib
 
 # Konfiguracja strony
 st.set_page_config(page_title="Mundial Typer 2026", page_icon="⚽", layout="centered")
 
 # --- KONFIGURACJA EKIPY ---
 # Wpisz tutaj dokładnie 8 nicków Twoich znajomych
-LISTA_TYPEROW = ["Kamil Kiwer", "Jakub Szabat", "Bartosz Jarzyński", "Mateusz Panic", "Jakub Michalczyk", "Bartek Michalczyk", "Fabian Gołębiowski", "Piotr Strusz"]
+LISTA_TYPEROW = ["Kamil Kiwer", "Jakub Szabat", "Bartosz Jarzyński", "Mateusz Panic", "Jakub Michalczyk", "Bartek Michalczyk", "Fabian Gołębiowski", "Piotr Strusz", "Michał Kruczalok"]
 
-st.title("🏆 Oficjalny Typer Mundialu")
-st.write("Wprowadzaj swoje typy i śledź tabelę na żywo!")
+# Inicjalizacja session state
+if "logged_in_user" not in st.session_state:
+    st.session_state.logged_in_user = None
+if "auth_tried" not in st.session_state:
+    st.session_state.auth_tried = False
+if "show_password_change" not in st.session_state:
+    st.session_state.show_password_change = False
+if "show_setup_password" not in st.session_state:
+    st.session_state.show_setup_password = False
 
 # 1. Połączenie z Supabase
 @st.cache_resource
@@ -53,8 +62,214 @@ def get_supabase_client():
         )
         return None
 
+# --- FUNKCJE BEZPIECZEŃSTWA HASEŁ ---
+def hash_password(password: str) -> str:
+    """Haszuje hasło używając bcrypt"""
+    return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
 
-@st.cache_data(ttl=10)
+def verify_password(stored_hash: str, password: str) -> bool:
+    """Weryfikuje hasło z haszem"""
+    try:
+        return bcrypt.checkpw(password.encode(), stored_hash.encode())
+    except:
+        return False
+
+def get_user_password_hash(username: str):
+    """Pobiera zahaszowane hasło użytkownika z Supabase"""
+    client = get_supabase_client()
+    if client is None:
+        return None
+    
+    try:
+        result = client.table("user_credentials").select("password_hash").eq("username", username).execute()
+        data = result.data if hasattr(result, "data") else result
+        
+        if data and len(data) > 0:
+            return data[0].get("password_hash")
+        return None
+    except Exception as e:
+        st.error(f"Błąd przy pobieraniu hasła: {e}")
+        return None
+
+def set_user_password(username: str, password: str) -> bool:
+    """Ustawia lub aktualizuje hasło użytkownika w Supabase"""
+    client = get_supabase_client()
+    if client is None:
+        return False
+    
+    try:
+        password_hash = hash_password(password)
+        
+        # Sprawdzamy czy użytkownik już istnieje
+        existing = client.table("user_credentials").select("username").eq("username", username).execute()
+        existing_data = existing.data if hasattr(existing, "data") else existing
+        
+        if existing_data and len(existing_data) > 0:
+            # Aktualizujemy istniejące hasło
+            result = client.table("user_credentials").update({"password_hash": password_hash}).eq("username", username).execute()
+        else:
+            # Tworzymy nowy rekord
+            result = client.table("user_credentials").insert({"username": username, "password_hash": password_hash}).execute()
+        
+        error = getattr(result, "error", None)
+        if error:
+            st.error(f"Błąd przy zapisywaniu hasła: {error}")
+            return False
+        return True
+    except Exception as e:
+        st.error(f"Błąd przy ustawianiu hasła: {e}")
+        return False
+
+def authenticate_user(username: str, password: str) -> bool:
+    """Autentykuje użytkownika"""
+    stored_hash = get_user_password_hash(username)
+    if stored_hash is None:
+        return False
+    return verify_password(stored_hash, password)
+
+def user_has_password(username: str) -> bool:
+    """Sprawdza, czy użytkownik ma ustawione hasło"""
+    return get_user_password_hash(username) is not None
+
+def login_sidebar():
+    """Wyświetla formularz logowania w sidebae"""
+    with st.sidebar:
+        st.write("---")
+        st.subheader("🔐 Logowanie")
+        
+        username = st.selectbox("Wybierz swojego nicka:", LISTA_TYPEROW, key="login_user")
+        
+        col1, col2 = st.columns(2)
+        with col1:
+            if st.button("🔑 Ustaw hasło", key="setup_pass_btn", help="Jeśli to Twoja pierwsza próba - kliknij tutaj"):
+                st.session_state.show_setup_password = True
+                st.rerun()
+        with col2:
+            if st.button("Zaloguj się", key="login_btn"):
+                password = st.session_state.get("login_pass", "")
+                if authenticate_user(username, password):
+                    st.session_state.logged_in_user = username
+                    st.session_state.auth_tried = True
+                    st.success(f"Zalogowano jako: {username}")
+                    st.rerun()
+                else:
+                    if not user_has_password(username):
+                        st.error("Ten użytkownik nie ma jeszcze ustawionego hasła!")
+                        st.info("Kliknij '🔑 Ustaw hasło' aby ustawić hasło.")
+                    else:
+                        st.error("Nieprawidłowe hasło!")
+                    st.session_state.auth_tried = True
+        
+        password = st.text_input("Hasło:", type="password", key="login_pass")
+        st.info("💡 Jeśli to Twoja pierwsza próba, kliknij '🔑 Ustaw hasło'")
+
+def setup_password_dialog():
+    """Wyświetla dialog do ustawienia hasła dla nowych użytkowników"""
+    if st.session_state.show_setup_password:
+        st.divider()
+        st.subheader("🔑 Ustaw swoje hasło")
+        st.info("Wybierz bezpieczne hasło, które będziesz pamiętać. Nikt inny go nie widzi!")
+        
+        with st.form("setup_password_form", clear_on_submit=False):
+            username_for_setup = st.selectbox("Twój nick:", LISTA_TYPEROW, key="setup_user")
+            new_password = st.text_input("Nowe hasło (min 6 znaków):", type="password", key="setup_new_pass")
+            confirm_password = st.text_input("Potwierdź hasło:", type="password", key="setup_confirm_pass")
+            
+            col1, col2 = st.columns(2)
+            with col1:
+                submitted = st.form_submit_button("💾 Ustaw hasło")
+            with col2:
+                cancel = st.form_submit_button("❌ Anuluj")
+            
+            if cancel:
+                st.session_state.show_setup_password = False
+                st.rerun()
+            
+            if submitted:
+                if not new_password or not confirm_password:
+                    st.error("Wszystkie pola są wymagane!")
+                elif new_password != confirm_password:
+                    st.error("Hasła się nie zgadzają!")
+                elif len(new_password) < 6:
+                    st.error("Hasło musi mieć co najmniej 6 znaków!")
+                elif user_has_password(username_for_setup):
+                    st.error(f"Użytkownik {username_for_setup} ma już ustawione hasło!")
+                    st.info("Aby zmienić hasło, zaloguj się i użyj opcji 'Zmień hasło'")
+                else:
+                    if set_user_password(username_for_setup, new_password):
+                        st.success(f"✅ Hasło dla {username_for_setup} zostało ustawione!")
+                        st.info("Teraz możesz się zalogować!")
+                        st.session_state.show_setup_password = False
+                        st.balloons()
+                        st.rerun()
+                    else:
+                        st.error("Błąd przy ustawianiu hasła!")
+
+def logout_sidebar():
+    """Wyświetla przycisk wylogowania i opcje użytkownika w sidebae"""
+    with st.sidebar:
+        st.write("---")
+        st.subheader(f"👤 {st.session_state.logged_in_user}")
+        
+        if st.button("🔑 Zmień hasło", key="change_pass_btn"):
+            st.session_state.show_password_change = True
+        
+        if st.button("Wyloguj się", key="logout_btn"):
+            st.session_state.logged_in_user = None
+            st.session_state.auth_tried = False
+            st.session_state.show_password_change = False
+            st.rerun()
+
+def show_password_change_dialog():
+    """Wyświetla dialog do zmiany hasła"""
+    if st.session_state.show_password_change:
+        st.divider()
+        st.subheader("🔑 Zmiana hasła")
+        
+        with st.form("change_password_form", clear_on_submit=False):
+            old_password = st.text_input("Stare hasło:", type="password", key="old_pass")
+            new_password = st.text_input("Nowe hasło:", type="password", key="new_pass")
+            confirm_password = st.text_input("Potwierdź nowe hasło:", type="password", key="confirm_pass")
+            
+            submitted = st.form_submit_button("Zmień hasło")
+            
+            if submitted:
+                if not old_password or not new_password or not confirm_password:
+                    st.error("Wszystkie pola są wymagane!")
+                elif new_password != confirm_password:
+                    st.error("Nowe hasła się nie zgadzają!")
+                elif len(new_password) < 6:
+                    st.error("Nowe hasło musi mieć co najmniej 6 znaków!")
+                elif not authenticate_user(st.session_state.logged_in_user, old_password):
+                    st.error("Stare hasło jest nieprawidłowe!")
+                else:
+                    if set_user_password(st.session_state.logged_in_user, new_password):
+                        st.success("✅ Hasło zostało zmienione!")
+                        st.session_state.show_password_change = False
+                        st.rerun()
+                    else:
+                        st.error("Błąd przy zmianie hasła!")
+
+st.title("🏆 Oficjalny Typer Mundialu")
+st.write("Wprowadzaj swoje typy i śledź tabelę na żywo!")
+
+# --- SPRAWDZENIE LOGOWANIA ---
+if st.session_state.logged_in_user is None:
+    if st.session_state.show_setup_password:
+        # Pokaż dialog do ustawienia hasła
+        setup_password_dialog()
+    else:
+        # Pokaż formularz logowania
+        login_sidebar()
+    
+    st.info("⚠️ Zaloguj się, aby uzyskać dostęp do aplikacji")
+    st.stop()
+
+# Użytkownik jest zalogowany - wyświetl opcję wylogowania
+logout_sidebar()
+
+# Wyświetl dialog do zmiany hasła jeśli użytkownik go otworzył
+show_password_change_dialog()
 def load_sheets_data():
     """Ładuje dane z Supabase tables: `matches` i `predictions`"""
     client = get_supabase_client()
@@ -179,7 +394,9 @@ else:
         )
         
         with st.form("formularz_typu", clear_on_submit=False):
-            wybrany_nick = st.selectbox("Wybierz swój Nick:", [""] + LISTA_TYPEROW)
+            # Zalogowany użytkownik nie musi wybierać nicka
+            st.write(f"**Logowany jako:** {st.session_state.logged_in_user}")
+            
             wybrany_mecz_opis = st.selectbox("Wybierz mecz:", mecze_do_typowania["Opis"])
             
             # Wyciągamy ID meczu z opisu
@@ -194,60 +411,60 @@ else:
             submit_button = st.form_submit_button("Zapisz mój typ")
             
             if submit_button:
-                if not wybrany_nick:
-                    st.error("Musisz wybrać swój Nick z listy!")
-                else:
-                    # Sprawdzamy, czy ten użytkownik już typował ten mecz
-                    maska_duplikatu = (df_typy["name"] == wybrany_nick) & (df_typy["matchId"] == wybrane_mecz_id)
-                    
-                    # Tworzymy słownik dla obecnego typu
-                    record = {
-                        "name": wybrany_nick,
-                        "matchId": wybrane_mecz_id,
-                        "homeGoals": gole_gospodarz,
-                        "awayGoals": gole_gosc,
-                    }
+                # Używamy zalogowanego użytkownika
+                wybrany_nick = st.session_state.logged_in_user
+                
+                # Sprawdzamy, czy ten użytkownik już typował ten mecz
+                maska_duplikatu = (df_typy["name"] == wybrany_nick) & (df_typy["matchId"] == wybrane_mecz_id)
+                
+                # Tworzymy słownik dla obecnego typu
+                record = {
+                    "name": wybrany_nick,
+                    "matchId": wybrane_mecz_id,
+                    "homeGoals": gole_gospodarz,
+                    "awayGoals": gole_gosc,
+                }
 
-                    def save_prediction(record):
-                        """Insert or update one prediction in Supabase."""
-                        client = get_supabase_client()
-                        if client is None:
-                            return False, "Brak połączenia z Supabase."
+                def save_prediction(record):
+                    """Insert or update one prediction in Supabase."""
+                    client = get_supabase_client()
+                    if client is None:
+                        return False, "Brak połączenia z Supabase."
 
-                        try:
-                            exists = client.table("predictions").select("*").eq("name", record["name"]).eq("matchId", record["matchId"]).execute()
-                            if getattr(exists, "error", None):
-                                return False, f"Błąd odczytu predictions: {exists.error}"
+                    try:
+                        exists = client.table("predictions").select("*").eq("name", record["name"]).eq("matchId", record["matchId"]).execute()
+                        if getattr(exists, "error", None):
+                            return False, f"Błąd odczytu predictions: {exists.error}"
 
-                            exists_data = exists.data if hasattr(exists, "data") else exists
-                            if exists_data and len(exists_data) > 0:
-                                res = client.table("predictions").update(record).match({"name": record["name"], "matchId": record["matchId"]}).execute()
-                                action = "updated"
-                            else:
-                                res = client.table("predictions").insert(record).execute()
-                                action = "inserted"
-
-                            if getattr(res, "error", None):
-                                return False, f"Błąd zapisu predictions: {res.error}"
-                            return True, f"Dane zostały {action} w Supabase (predictions)."
-                        except Exception as e:
-                            return False, f"Błąd przy aktualizacji Supabase: {e}"
-
-                    ok, message = save_prediction(record)
-                    if ok:
-                        if not df_typy.empty and maska_duplikatu.any():
-                            df_typy.loc[maska_duplikatu, "homeGoals"] = gole_gospodarz
-                            df_typy.loc[maska_duplikatu, "awayGoals"] = gole_gosc
-                            st.success(f"Zaktualizowano Twój poprzedni typ na ten mecz!")
+                        exists_data = exists.data if hasattr(exists, "data") else exists
+                        if exists_data and len(exists_data) > 0:
+                            res = client.table("predictions").update(record).match({"name": record["name"], "matchId": record["matchId"]}).execute()
+                            action = "updated"
                         else:
-                            nowy_wiersz = pd.DataFrame([record])
-                            df_typy = pd.concat([df_typy, nowy_wiersz], ignore_index=True)
-                            st.success(f"Twój typ został pomyślnie zapisany!")
-                        st.success(message)
-                        if hasattr(st, "experimental_rerun"):
-                            st.experimental_rerun()
+                            res = client.table("predictions").insert(record).execute()
+                            action = "inserted"
+
+                        if getattr(res, "error", None):
+                            return False, f"Błąd zapisu predictions: {res.error}"
+                        return True, f"Dane zostały {action} w Supabase (predictions)."
+                    except Exception as e:
+                        return False, f"Błąd przy aktualizacji Supabase: {e}"
+
+                ok, message = save_prediction(record)
+                if ok:
+                    if not df_typy.empty and maska_duplikatu.any():
+                        df_typy.loc[maska_duplikatu, "homeGoals"] = gole_gospodarz
+                        df_typy.loc[maska_duplikatu, "awayGoals"] = gole_gosc
+                        st.success(f"Zaktualizowano Twój poprzedni typ na ten mecz!")
                     else:
-                        st.error(message)
+                        nowy_wiersz = pd.DataFrame([record])
+                        df_typy = pd.concat([df_typy, nowy_wiersz], ignore_index=True)
+                        st.success(f"Twój typ został pomyślnie zapisany!")
+                    st.success(message)
+                    if hasattr(st, "experimental_rerun"):
+                        st.experimental_rerun()
+                else:
+                    st.error(message)
 
 # --- SEKCJA 2: TABELA WYNIKÓW (LEADERBOARD) ---
 st.header("📊 Tabela Punktowa")
@@ -305,27 +522,57 @@ else:
         tabela_koncowa.index = tabela_koncowa.index + 1
         st.dataframe(tabela_koncowa, use_container_width=True)
 
-# --- SEKCJA 3: PRZEGLĄD TYPÓW KONKRETNEGO GRACZA ---
-st.header("🔍 Typy wybranego gracza")
-wybrany_gracz_do_podgladu = st.selectbox("Pokaż typy użytkownika:", [""] + LISTA_TYPEROW)
+# --- SEKCJA 3: PRZEGLĄD TYPÓW ZALOGOWANEGO GRACZA ---
+st.header("🔍 Twoje typy")
 
-if wybrany_gracz_do_podgladu:
-    if df_typy.empty:
-        st.info("Brak zapisanych typów w bazie danych.")
+if df_typy.empty:
+    st.info("Brak zapisanych typów w bazie danych.")
+else:
+    df_user_typy = df_typy[df_typy["name"] == st.session_state.logged_in_user].copy()
+    if df_user_typy.empty:
+        st.info(f"Jeszcze nie wprowadzono typów.")
     else:
-        df_user_typy = df_typy[df_typy["name"] == wybrany_gracz_do_podgladu].copy()
-        if df_user_typy.empty:
-            st.info(f"Użytkownik {wybrany_gracz_do_podgladu} jeszcze nie wprowadził typów.")
-        else:
-            # Dopełniamy do informacji o meczu z tabeli matches
-            df_user_typy = df_user_typy.rename(columns={"homeGoals": "pred_homeGoals", "awayGoals": "pred_awayGoals"})
-            df_user_typy = pd.merge(
-                df_user_typy,
-                df_mecze[["id", "home", "away"]],
-                on="id",
-                how="left",
-            )
-            df_user_typy["Mecz"] = df_user_typy.apply(lambda r: f"{r['home']} vs {r['away']}", axis=1)
-            df_user_typy["Typ"] = df_user_typy.apply(lambda r: f"{int(r['pred_homeGoals'])}-{int(r['pred_awayGoals'])}", axis=1)
-            df_user_typy = df_user_typy[["id", "Mecz", "Typ"]].sort_values("id")
-            st.table(df_user_typy.rename(columns={"id": "Mecz ID"}))
+        # Dopełniamy do informacji o meczu z tabeli matches
+        df_user_typy = df_user_typy.rename(columns={"homeGoals": "pred_homeGoals", "awayGoals": "pred_awayGoals"})
+        df_user_typy = pd.merge(
+            df_user_typy,
+            df_mecze[["id", "home", "away", "homeGoals", "awayGoals"]],
+            on="id",
+            how="left",
+        )
+        
+        # Tworzymy ładne opisy
+        df_user_typy["Mecz"] = df_user_typy.apply(lambda r: f"{r['home']} vs {r['away']}", axis=1)
+        df_user_typy["Twój Typ"] = df_user_typy.apply(lambda r: f"{int(r['pred_homeGoals'])}-{int(r['pred_awayGoals'])}", axis=1)
+        
+        # Dodajemy wynik rzeczywisty jeśli jest dostępny
+        df_user_typy["Wynik"] = df_user_typy.apply(
+            lambda r: f"{int(r['homeGoals'])}-{int(r['awayGoals'])}" if not pd.isna(r['homeGoals']) and not pd.isna(r['awayGoals']) and str(r['homeGoals']).strip() != "" and str(r['awayGoals']).strip() != "" else "—",
+            axis=1
+        )
+        
+        # Liczymy punkty za każdy mecz jeśli mamy wynik rzeczywisty
+        def calc_points_for_match(row):
+            if pd.isna(row['homeGoals']) or pd.isna(row['awayGoals']) or str(row['homeGoals']).strip() == "" or str(row['awayGoals']).strip() == "":
+                return "—"
+            
+            tg, tk = int(row['homeGoals']), int(row['awayGoals'])
+            wg, wk = int(row['pred_homeGoals']), int(row['pred_awayGoals'])
+            
+            if tg == wg and tk == wk:
+                return "3 ✓"  # Dokładny wynik
+            elif (tg > tk and wg > wk) or (tg < tk and wg < wk) or (tg == tk and wg == wk):
+                return "1 ✓"  # Trafiony zwycięzca / remis
+            return "0 ✗"
+        
+        df_user_typy["Punkty"] = df_user_typy.apply(calc_points_for_match, axis=1)
+        
+        # Wybieramy i sortujemy kolumny
+        df_display = df_user_typy[["id", "Mecz", "Twój Typ", "Wynik", "Punkty"]].sort_values("id").reset_index(drop=True)
+        df_display.index = df_display.index + 1
+        
+        st.dataframe(
+            df_display.rename(columns={"id": "ID"}),
+            use_container_width=True,
+            hide_index=False
+        )

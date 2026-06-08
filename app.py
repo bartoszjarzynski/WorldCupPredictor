@@ -6,6 +6,8 @@ from supabase import create_client
 import json
 import bcrypt
 import hashlib
+from datetime import datetime
+import pytz
 
 # Konfiguracja strony
 st.set_page_config(page_title="Mundial Typer 2026", page_icon="⚽", layout="centered")
@@ -365,6 +367,47 @@ if not df_typy.empty:
     elif "id" in df_typy.columns:
         df_typy["id"] = df_typy["id"].astype(int)
 
+# --- FUNKCJE DO SPRAWDZENIA CZASU MECZU ---
+def get_poland_time():
+    """Pobiera bieżący czas w strefie czasowej Polski"""
+    poland_tz = pytz.timezone('Europe/Warsaw')
+    return datetime.now(poland_tz)
+
+def has_match_started(start_time_str):
+    """Sprawdza, czy mecz już się zaczął na podstawie czasu Polski"""
+    if pd.isna(start_time_str) or str(start_time_str).strip() == "":
+        return False
+    
+    try:
+        # Parsuj czas meczu z różnych formatów
+        match_time = None
+        for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M"]:
+            try:
+                match_time = datetime.strptime(str(start_time_str).strip(), fmt)
+                break
+            except ValueError:
+                continue
+        
+        if match_time is None:
+            # Spróbuj parsować jako ISO format
+            try:
+                match_time = pd.to_datetime(start_time_str)
+                match_time = match_time.to_pydatetime()
+            except:
+                return False
+        
+        # Jeśli czas nie ma info o strefie, zakładaj że to czas polski
+        if match_time.tzinfo is None:
+            poland_tz = pytz.timezone('Europe/Warsaw')
+            match_time = poland_tz.localize(match_time)
+        
+        # Porównaj z bieżącym czasem w Polsce
+        current_poland_time = get_poland_time()
+        return current_poland_time >= match_time
+    except Exception as e:
+        st.warning(f"Błąd przy sprawdzaniu czasu meczu: {e}")
+        return False
+
 # --- SEKCJA 1: FORMULARZ TYPOWANIA ---
 st.header("⚽ Obstaw mecz")
 
@@ -383,15 +426,35 @@ else:
 
     home_empty = df_mecze["homeGoals"].apply(is_empty_score)
     away_empty = df_mecze["awayGoals"].apply(is_empty_score)
-    mecze_do_typowania = df_mecze[home_empty | away_empty].sort_values("id")
+    mecze_bez_wyniku = df_mecze[home_empty | away_empty].sort_values("id")
+    
+    # Filtrujemy mecze, które jeszcze się nie zaczęły (na podstawie start_time i czasu Polski)
+    if "start_time" in mecze_bez_wyniku.columns:
+        mecze_do_typowania = mecze_bez_wyniku[~mecze_bez_wyniku["start_time"].apply(has_match_started)].sort_values("id")
+        # Mecze, które już się zaczęły
+        mecze_zakonczone = mecze_bez_wyniku[mecze_bez_wyniku["start_time"].apply(has_match_started)].sort_values("id")
+    else:
+        # Jeśli nie ma start_time, pokazujemy wszystkie mecze bez wyniku (wsteczna kompatybilność)
+        mecze_do_typowania = mecze_bez_wyniku
+        mecze_zakonczone = pd.DataFrame()
 
     if mecze_do_typowania.empty:
-        st.info("Wszystkie mecze z zakładki 'Mecze' zostały już rozegrane i uzupełnione!")
+        if not mecze_zakonczone.empty:
+            st.info("⏱️ Wszystkie dostępne mecze już się rozpoczęły. Nie możesz już typować.")
+            st.subheader("Mecze w toku:")
+            for _, mecz in mecze_zakonczone.iterrows():
+                st.write(f"🔴 Mecz {int(mecz['id'])}: {mecz['home']} vs {mecz['away']}")
+        else:
+            st.info("Wszystkie mecze z zakładki 'Mecze' zostały już rozegrane i uzupełnione!")
     else:
         # Tworzymy ładny opis dla selectboxa, np. "Mecz 1: USA vs Maroko"
         mecze_do_typowania["Opis"] = mecze_do_typowania.apply(
             lambda r: f"Mecz {r['id']}: {r['home']} vs {r['away']}", axis=1
         )
+        
+        # Wyświetl komunikat o zagrożonych meczach
+        if not mecze_zakonczone.empty:
+            st.warning(f"⏱️ {len(mecze_zakonczone)} mecz(e) już się rozpoczął(y) - nie możesz typować.")
         
         with st.form("formularz_typu", clear_on_submit=False):
             # Zalogowany użytkownik nie musi wybierać nicka

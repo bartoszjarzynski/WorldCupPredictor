@@ -272,6 +272,8 @@ logout_sidebar()
 
 # Wyświetl dialog do zmiany hasła jeśli użytkownik go otworzył
 show_password_change_dialog()
+
+@st.cache_data(ttl=10)
 def load_sheets_data():
     """Ładuje dane z Supabase tables: `matches` i `predictions`"""
     client = get_supabase_client()

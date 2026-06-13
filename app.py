@@ -759,3 +759,115 @@ else:
             use_container_width=True,
             hide_index=False
         )
+
+
+# --- POMOCNICZE: parsowanie czasu i formatowanie wyniku ---
+def parse_match_time(start_time_str):
+    """Parsuje start_time meczu do tz-aware datetime (Europe/Warsaw) lub None."""
+    if pd.isna(start_time_str) or str(start_time_str).strip() == "":
+        return None
+    match_time = None
+    for fmt in ["%Y-%m-%d %H:%M:%S", "%Y-%m-%d %H:%M", "%d-%m-%Y %H:%M:%S", "%d-%m-%Y %H:%M"]:
+        try:
+            match_time = datetime.strptime(str(start_time_str).strip(), fmt)
+            break
+        except ValueError:
+            continue
+    if match_time is None:
+        try:
+            match_time = pd.to_datetime(start_time_str).to_pydatetime()
+        except Exception:
+            return None
+    poland_tz = pytz.timezone('Europe/Warsaw')
+    if match_time.tzinfo is None:
+        match_time = poland_tz.localize(match_time)
+    else:
+        match_time = match_time.astimezone(poland_tz)
+    return match_time
+
+
+def _ma_wartosc(v):
+    """True, jeśli pole wyniku jest wypełnione."""
+    return not (pd.isna(v) or str(v).strip() == "")
+
+
+def _format_wynik(hg, ag):
+    """Formatuje parę goli jako 'X-Y' lub '—' przy braku danych."""
+    try:
+        return f"{int(float(hg))}-{int(float(ag))}"
+    except Exception:
+        return "—"
+
+
+# --- SEKCJA 4: AKTUALNY MECZ - TYPY WSZYSTKICH GRACZY ---
+st.header("🔴 Aktualny mecz — typy graczy")
+
+if df_mecze.empty or "start_time" not in df_mecze.columns:
+    st.info("Brak informacji o czasie rozpoczęcia meczów (kolumna `start_time` w tabeli matches).")
+else:
+    now_pl = get_poland_time()
+    # Mecze, które już się rozpoczęły (start_time minął)
+    rozpoczete = []
+    for _, m in df_mecze.iterrows():
+        mt = parse_match_time(m.get("start_time"))
+        if mt is not None and now_pl >= mt:
+            rozpoczete.append((mt, m))
+
+    if not rozpoczete:
+        st.info("Żaden mecz jeszcze się nie rozpoczął. Tabela pojawi się, gdy zacznie się pierwszy mecz.")
+    else:
+        # Najpóźniej rozpoczęty mecz = aktualnie grany (przełączy się, gdy zacznie się następny)
+        rozpoczete.sort(key=lambda x: x[0])
+        czas_startu, aktualny = rozpoczete[-1]
+        mid = int(aktualny["id"])
+        if _ma_wartosc(aktualny.get("homeGoals")) and _ma_wartosc(aktualny.get("awayGoals")):
+            wynik = _format_wynik(aktualny.get("homeGoals"), aktualny.get("awayGoals"))
+        else:
+            wynik = "w trakcie / brak wyniku"
+
+        st.subheader(f"⚽ {aktualny['home']} vs {aktualny['away']}")
+        st.caption(f"Start: {czas_startu.strftime('%d.%m.%Y %H:%M')} (czas PL)  ·  Wynik: {wynik}")
+
+        # Typy graczy na ten mecz
+        typy_meczu = df_typy[df_typy["id"] == mid] if not df_typy.empty else pd.DataFrame()
+        mapa_typow = {p["name"]: _format_wynik(p.get("homeGoals"), p.get("awayGoals"))
+                      for _, p in typy_meczu.iterrows()}
+
+        wiersze = [{"Gracz": g, "Typ": mapa_typow.get(g, "— brak typu")} for g in LISTA_TYPEROW]
+        st.dataframe(pd.DataFrame(wiersze), use_container_width=True, hide_index=True)
+        st.caption("Tabela przełączy się automatycznie na kolejny mecz, gdy ten się rozpocznie.")
+
+
+# --- SEKCJA 5: TYPY NA ROZEGRANE MECZE (wszyscy gracze) ---
+st.header("📜 Typy na rozegrane mecze")
+
+if df_mecze.empty:
+    st.info("Brak meczów w bazie.")
+else:
+    # Mecze z oficjalnym wynikiem = rozegrane
+    maska_rozegrane = df_mecze.apply(
+        lambda r: _ma_wartosc(r.get("homeGoals")) and _ma_wartosc(r.get("awayGoals")), axis=1
+    )
+    rozegrane = df_mecze[maska_rozegrane].sort_values("id")
+
+    if rozegrane.empty:
+        st.info("Żaden mecz nie został jeszcze rozegrany.")
+    elif df_typy.empty:
+        st.info("Brak zapisanych typów w bazie.")
+    else:
+        wiersze = []
+        for _, m in rozegrane.iterrows():
+            mid = int(m["id"])
+            wiersz = {
+                "Mecz": f"{m['home']} vs {m['away']}",
+                "Wynik": _format_wynik(m.get("homeGoals"), m.get("awayGoals")),
+            }
+            typy_meczu = df_typy[df_typy["id"] == mid]
+            mapa = {p["name"]: _format_wynik(p.get("homeGoals"), p.get("awayGoals"))
+                    for _, p in typy_meczu.iterrows()}
+            for g in LISTA_TYPEROW:
+                wiersz[g] = mapa.get(g, "—")
+            wiersze.append(wiersz)
+
+        st.dataframe(pd.DataFrame(wiersze), use_container_width=True, hide_index=True)
+        st.caption("Każda kolumna to jeden gracz — wartość to jego typ na dany mecz. „—\" oznacza brak typu.")

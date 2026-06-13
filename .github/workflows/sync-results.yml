@@ -1,0 +1,30 @@
+name: Sync wyników MŚ 2026
+
+on:
+  schedule:
+    # Co godzinę (czas UTC). GitHub może uruchomić z paroma minutami opóźnienia.
+    - cron: "0 * * * *"
+  # Pozwala też odpalić ręcznie z zakładki Actions (przycisk "Run workflow").
+  workflow_dispatch:
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Pobierz kod
+        uses: actions/checkout@v4
+
+      - name: Ustaw Pythona
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Zainstaluj zależności
+        run: pip install requests supabase
+
+      - name: Uruchom synchronizację
+        env:
+          FOOTBALL_DATA_TOKEN: ${{ secrets.FOOTBALL_DATA_TOKEN }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
+        run: python sync_results.py

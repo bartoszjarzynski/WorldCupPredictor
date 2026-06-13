@@ -1,6 +1,9 @@
 # Streamlit secrets - NEVER commit this!
 .streamlit/secrets.toml
 
+# Plik testowy z zahardkodowanym kluczem API - nie commitować!
+test.py
+
 # Python
 __pycache__/
 *.py[cod]

@@ -5,3 +5,4 @@ pandas>=1.5.0
 numpy>=1.23.0
 bcrypt>=4.0.0
 pytz>=2024.1
+streamlit-autorefresh>=1.0.1

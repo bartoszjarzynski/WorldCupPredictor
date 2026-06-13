@@ -8,6 +8,8 @@ import bcrypt
 import hashlib
 from datetime import datetime
 import pytz
+from streamlit_autorefresh import st_autorefresh
+from core import LISTA_TYPEROW, kategoria_typu
 
 # Konfiguracja strony
 st.set_page_config(page_title="Mundial Typer 2026", page_icon="⚽", layout="centered")
@@ -129,8 +131,8 @@ def inject_custom_css():
 inject_custom_css()
 
 # --- KONFIGURACJA EKIPY ---
-# Wpisz tutaj dokładnie 8 nicków Twoich znajomych
-LISTA_TYPEROW = ["Kamil Kiwer", "Jakub Szabat", "Bartosz Jarzyński", "Mateusz Panic", "Jakub Michalczyk", "Bartek Michalczyk", "Fabian Gołębiowski", "Piotr Strusz", "Michał Kruczalok"]
+# Lista typerów jest teraz w core.py (jedyne źródło prawdy, współdzielone z podstronami).
+# LISTA_TYPEROW importujemy z core na górze pliku.
 
 # Inicjalizacja session state
 if "logged_in_user" not in st.session_state:
@@ -703,7 +705,18 @@ else:
         
         # Dodajemy kolumnę z pozycją (np. 1, 2, 3...)
         tabela_koncowa.index = tabela_koncowa.index + 1
-        st.dataframe(tabela_koncowa, use_container_width=True)
+        tabela_koncowa = tabela_koncowa.rename(columns={"name": "Gracz"})
+
+        # Podświetlamy wiersz zalogowanego gracza
+        def _podswietl_gracza(row):
+            if row["Gracz"] == st.session_state.logged_in_user:
+                return ["background-color: rgba(0,229,255,0.18); font-weight:700;"] * len(row)
+            return [""] * len(row)
+
+        st.dataframe(
+            tabela_koncowa.style.apply(_podswietl_gracza, axis=1),
+            use_container_width=True,
+        )
 
 # --- SEKCJA 3: PRZEGLĄD TYPÓW ZALOGOWANEGO GRACZA ---
 st.header("🔍 Twoje typy")
@@ -799,6 +812,38 @@ def _format_wynik(hg, ag):
         return "—"
 
 
+# --- SEKCJA: KTO JESZCZE NIE OBSTAWIŁ NASTĘPNEGO MECZU ---
+st.header("⏳ Kto jeszcze nie obstawił")
+
+if df_mecze.empty or "start_time" not in df_mecze.columns:
+    st.info("Brak danych o czasie rozpoczęcia meczów.")
+else:
+    teraz = get_poland_time()
+    przyszle = []
+    for _, m in df_mecze.iterrows():
+        mt = parse_match_time(m.get("start_time"))
+        if mt is not None and mt > teraz:
+            przyszle.append((mt, m))
+
+    if not przyszle:
+        st.info("Brak nadchodzących meczów do obstawienia.")
+    else:
+        przyszle.sort(key=lambda x: x[0])
+        czas_nast, nast = przyszle[0]
+        mid_nast = int(nast["id"])
+        st.subheader(f"➡️ Następny mecz: {nast['home']} vs {nast['away']}")
+        st.caption(f"Start: {czas_nast.strftime('%d.%m.%Y %H:%M')} (czas PL)")
+
+        obstawili = set(df_typy[df_typy["id"] == mid_nast]["name"]) if not df_typy.empty else set()
+        brakujacy = [g for g in LISTA_TYPEROW if g not in obstawili]
+
+        if not brakujacy:
+            st.success("✅ Wszyscy już obstawili ten mecz!")
+        else:
+            st.warning(f"⚠️ Jeszcze nie obstawili ({len(brakujacy)}/{len(LISTA_TYPEROW)}): "
+                       + ", ".join(brakujacy))
+
+
 # --- SEKCJA 4: AKTUALNY MECZ - TYPY WSZYSTKICH GRACZY ---
 st.header("🔴 Aktualny mecz — typy graczy")
 
@@ -820,10 +865,13 @@ else:
         rozpoczete.sort(key=lambda x: x[0])
         czas_startu, aktualny = rozpoczete[-1]
         mid = int(aktualny["id"])
-        if _ma_wartosc(aktualny.get("homeGoals")) and _ma_wartosc(aktualny.get("awayGoals")):
+        ma_wynik = _ma_wartosc(aktualny.get("homeGoals")) and _ma_wartosc(aktualny.get("awayGoals"))
+        if ma_wynik:
             wynik = _format_wynik(aktualny.get("homeGoals"), aktualny.get("awayGoals"))
         else:
+            # Mecz w toku (brak wyniku) — odświeżaj stronę co 60 s, aby tabela żyła na żywo
             wynik = "w trakcie / brak wyniku"
+            st_autorefresh(interval=60000, key="live_refresh")
 
         st.subheader(f"⚽ {aktualny['home']} vs {aktualny['away']}")
         st.caption(f"Start: {czas_startu.strftime('%d.%m.%Y %H:%M')} (czas PL)  ·  Wynik: {wynik}")
@@ -855,19 +903,54 @@ else:
     elif df_typy.empty:
         st.info("Brak zapisanych typów w bazie.")
     else:
+        uzytkownik = st.session_state.logged_in_user
         wiersze = []
+        kategorie = []  # równoległa macierz kategorii trafień (do kolorowania)
         for _, m in rozegrane.iterrows():
             mid = int(m["id"])
-            wiersz = {
-                "Mecz": f"{m['home']} vs {m['away']}",
-                "Wynik": _format_wynik(m.get("homeGoals"), m.get("awayGoals")),
-            }
-            typy_meczu = df_typy[df_typy["id"] == mid]
-            mapa = {p["name"]: _format_wynik(p.get("homeGoals"), p.get("awayGoals"))
-                    for _, p in typy_meczu.iterrows()}
-            for g in LISTA_TYPEROW:
-                wiersz[g] = mapa.get(g, "—")
-            wiersze.append(wiersz)
+            tg, tk = int(float(m["homeGoals"])), int(float(m["awayGoals"]))
+            wiersz = {"Mecz": f"{m['home']} vs {m['away']}", "Wynik": f"{tg}-{tk}"}
+            kat = {"Mecz": "", "Wynik": ""}
 
-        st.dataframe(pd.DataFrame(wiersze), use_container_width=True, hide_index=True)
-        st.caption("Każda kolumna to jeden gracz — wartość to jego typ na dany mecz. „—\" oznacza brak typu.")
+            preds = {}
+            for _, p in df_typy[df_typy["id"] == mid].iterrows():
+                try:
+                    preds[p["name"]] = (int(float(p["homeGoals"])), int(float(p["awayGoals"])))
+                except Exception:
+                    pass
+
+            for g in LISTA_TYPEROW:
+                kolumna = f"{g} (Ty)" if g == uzytkownik else g
+                if g in preds:
+                    wg, wk = preds[g]
+                    wiersz[kolumna] = f"{wg}-{wk}"
+                    kat[kolumna] = kategoria_typu(tg, tk, wg, wk)  # dokladny / zwyciezca / pudlo
+                else:
+                    wiersz[kolumna] = "—"
+                    kat[kolumna] = "brak"
+            wiersze.append(wiersz)
+            kategorie.append(kat)
+
+        df_roz = pd.DataFrame(wiersze)
+        df_kat = pd.DataFrame(kategorie)
+
+        kolory = {
+            "dokladny":  "background-color: rgba(34,197,94,0.45); color:#eafff1; font-weight:600;",
+            "zwyciezca": "background-color: rgba(249,115,22,0.45); color:#fff4e8; font-weight:600;",
+            "pudlo":     "background-color: rgba(239,68,68,0.40); color:#ffecec;",
+            "brak":      "color:#6b7280;",
+            "":          "",
+        }
+        df_styles = df_kat.replace(kolory)
+
+        styler = df_roz.style.apply(lambda _: df_styles, axis=None)
+        st.dataframe(styler, use_container_width=True, hide_index=True)
+
+        st.markdown(
+            "<small>"
+            "<span style='background:rgba(34,197,94,0.45);padding:2px 8px;border-radius:6px;'>🟢 dokładny wynik (3 pkt)</span>&nbsp;&nbsp;"
+            "<span style='background:rgba(249,115,22,0.45);padding:2px 8px;border-radius:6px;'>🟠 trafiony rezultat (1 pkt)</span>&nbsp;&nbsp;"
+            "<span style='background:rgba(239,68,68,0.40);padding:2px 8px;border-radius:6px;'>🔴 pudło (0 pkt)</span>"
+            "</small>",
+            unsafe_allow_html=True,
+        )

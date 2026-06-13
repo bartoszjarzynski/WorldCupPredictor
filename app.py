@@ -12,6 +12,122 @@ import pytz
 # Konfiguracja strony
 st.set_page_config(page_title="Mundial Typer 2026", page_icon="⚽", layout="centered")
 
+
+# --- STYLISTYKA: futurystyczny, elegancki motyw (ciemny + neon) ---
+def inject_custom_css():
+    st.markdown(
+        """
+        <style>
+        @import url('https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@400;500;600;700&display=swap');
+
+        /* === TŁO APLIKACJI === */
+        .stApp {
+            background:
+                radial-gradient(1200px 600px at 8% -10%, rgba(0,229,255,0.10), transparent 60%),
+                radial-gradient(1000px 520px at 92% 8%, rgba(168,85,247,0.12), transparent 55%),
+                linear-gradient(180deg, #070b16 0%, #0a0e1a 55%, #070a13 100%);
+            background-attachment: fixed;
+            color: #e8eefc;
+        }
+        html, body, [class*="css"] { font-family: 'Rajdhani', sans-serif; }
+
+        /* === NAGŁÓWKI === */
+        h1, h2, h3 { font-family: 'Orbitron', sans-serif !important; letter-spacing: 1px; }
+        h1 {
+            color: #7df9ff !important;
+            text-shadow: 0 0 18px rgba(0,229,255,0.45), 0 0 42px rgba(168,85,247,0.25);
+        }
+        h2, h3 {
+            color: #cfe9ff !important;
+            text-shadow: 0 0 16px rgba(0,229,255,0.18);
+        }
+
+        /* === PRZYCISKI === */
+        .stButton > button, [data-testid="stForm"] button, [data-testid="baseButton-secondary"] {
+            font-family: 'Rajdhani', sans-serif;
+            font-weight: 700;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+            color: #04111c;
+            background: linear-gradient(135deg, #00e5ff 0%, #36b9ff 100%);
+            border: 1px solid rgba(0,229,255,0.6);
+            border-radius: 12px;
+            padding: 0.5rem 1.1rem;
+            box-shadow: 0 0 18px rgba(0,229,255,0.30);
+            transition: all .2s ease;
+        }
+        .stButton > button:hover, [data-testid="stForm"] button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 0 28px rgba(0,229,255,0.60);
+            filter: brightness(1.08);
+        }
+
+        /* === FORMULARZE / KARTY (elegancka ramka, bez blur aby nie blokować pól) === */
+        [data-testid="stForm"] {
+            background: rgba(18,24,41,0.65);
+            border: 1px solid rgba(0,229,255,0.25);
+            border-radius: 18px;
+            padding: 1.6rem 1.6rem 1.1rem;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.03);
+        }
+
+        /* Karta logowania (wyśrodkowana, szklany wygląd bez blokowania pól) */
+        .login-card {
+            background: rgba(18,24,41,0.65);
+            border: 1px solid rgba(0,229,255,0.25);
+            border-radius: 18px;
+            padding: 1.4rem 1.5rem 0.6rem;
+            margin-top: 0.5rem;
+            box-shadow: 0 8px 40px rgba(0,0,0,0.45), inset 0 0 0 1px rgba(255,255,255,0.03);
+        }
+
+        /* === POLA WEJŚCIOWE — tło/tekst z motywu dark; tu tylko akcent na focusie === */
+        .stTextInput input:focus {
+            border-color: #00e5ff !important;
+            box-shadow: 0 0 0 2px rgba(0,229,255,0.30) !important;
+        }
+
+        /* Tytuł karty logowania */
+        .form-title {
+            font-family: 'Orbitron', sans-serif;
+            font-size: 1.35rem;
+            font-weight: 700;
+            text-align: center;
+            margin: 0 0 1.1rem 0;
+            color: #7df9ff;
+            text-shadow: 0 0 16px rgba(0,229,255,0.45);
+        }
+
+        /* === TABELE / DATAFRAME === */
+        [data-testid="stDataFrame"] {
+            border: 1px solid rgba(0,229,255,0.25);
+            border-radius: 14px;
+            overflow: hidden;
+            box-shadow: 0 0 24px rgba(0,229,255,0.12);
+        }
+
+        /* === SIDEBAR === */
+        [data-testid="stSidebar"] {
+            background: linear-gradient(180deg, rgba(12,17,30,0.96), rgba(8,11,20,0.96));
+            border-right: 1px solid rgba(0,229,255,0.18);
+        }
+
+        /* === ALERTY (info/success/error) === */
+        [data-testid="stAlert"] {
+            border-radius: 12px;
+        }
+
+        /* === SUWAK / METRYKI / OGÓLNE === */
+        [data-testid="stMetricValue"] { color: #7df9ff; font-family: 'Orbitron', sans-serif; }
+        hr { border-color: rgba(0,229,255,0.20); }
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+inject_custom_css()
+
 # --- KONFIGURACJA EKIPY ---
 # Wpisz tutaj dokładnie 8 nicków Twoich znajomych
 LISTA_TYPEROW = ["Kamil Kiwer", "Jakub Szabat", "Bartosz Jarzyński", "Mateusz Panic", "Jakub Michalczyk", "Bartek Michalczyk", "Fabian Gołębiowski", "Piotr Strusz", "Michał Kruczalok"]
@@ -133,37 +249,40 @@ def user_has_password(username: str) -> bool:
     """Sprawdza, czy użytkownik ma ustawione hasło"""
     return get_user_password_hash(username) is not None
 
-def login_sidebar():
-    """Wyświetla formularz logowania w sidebae"""
-    with st.sidebar:
-        st.write("---")
-        st.subheader("🔐 Logowanie")
-        
+def login_panel():
+    """Wyświetla wyśrodkowaną kartę logowania na środku ekranu (bez st.form)."""
+    col_l, col_c, col_r = st.columns([1, 2, 1])
+    with col_c:
+        st.markdown('<p class="form-title">⚡ LOGOWANIE</p>', unsafe_allow_html=True)
+
         username = st.selectbox("Wybierz swojego nicka:", LISTA_TYPEROW, key="login_user")
-        
-        col1, col2 = st.columns(2)
-        with col1:
-            if st.button("🔑 Ustaw hasło", key="setup_pass_btn", help="Jeśli to Twoja pierwsza próba - kliknij tutaj"):
-                st.session_state.show_setup_password = True
-                st.rerun()
-        with col2:
-            if st.button("Zaloguj się", key="login_btn"):
-                password = st.session_state.get("login_pass", "")
-                if authenticate_user(username, password):
-                    st.session_state.logged_in_user = username
-                    st.session_state.auth_tried = True
-                    st.success(f"Zalogowano jako: {username}")
-                    st.rerun()
-                else:
-                    if not user_has_password(username):
-                        st.error("Ten użytkownik nie ma jeszcze ustawionego hasła!")
-                        st.info("Kliknij '🔑 Ustaw hasło' aby ustawić hasło.")
-                    else:
-                        st.error("Nieprawidłowe hasło!")
-                    st.session_state.auth_tried = True
-        
         password = st.text_input("Hasło:", type="password", key="login_pass")
-        st.info("💡 Jeśli to Twoja pierwsza próba, kliknij '🔑 Ustaw hasło'")
+
+        b1, b2 = st.columns(2)
+        with b1:
+            setup_clicked = st.button("🔑 Ustaw hasło", key="setup_pass_btn", use_container_width=True)
+        with b2:
+            login_clicked = st.button("Zaloguj się", key="login_btn", use_container_width=True)
+
+        st.caption("💡 Pierwszy raz tutaj? Kliknij '🔑 Ustaw hasło', aby utworzyć swoje hasło.")
+
+        if setup_clicked:
+            st.session_state.show_setup_password = True
+            st.rerun()
+
+        if login_clicked:
+            if authenticate_user(username, password):
+                st.session_state.logged_in_user = username
+                st.session_state.auth_tried = True
+                st.success(f"Zalogowano jako: {username}")
+                st.rerun()
+            else:
+                if not user_has_password(username):
+                    st.error("Ten użytkownik nie ma jeszcze ustawionego hasła!")
+                    st.info("Kliknij '🔑 Ustaw hasło' aby ustawić hasło.")
+                else:
+                    st.error("Nieprawidłowe hasło!")
+                st.session_state.auth_tried = True
 
 def setup_password_dialog():
     """Wyświetla dialog do ustawienia hasła dla nowych użytkowników"""
@@ -261,10 +380,9 @@ if st.session_state.logged_in_user is None:
         # Pokaż dialog do ustawienia hasła
         setup_password_dialog()
     else:
-        # Pokaż formularz logowania
-        login_sidebar()
-    
-    st.info("⚠️ Zaloguj się, aby uzyskać dostęp do aplikacji")
+        # Pokaż wyśrodkowaną kartę logowania
+        login_panel()
+
     st.stop()
 
 # Użytkownik jest zalogowany - wyświetl opcję wylogowania

@@ -9,7 +9,8 @@ import hashlib
 from datetime import datetime
 import pytz
 from streamlit_autorefresh import st_autorefresh
-from core import LISTA_TYPEROW, kategoria_typu
+import streamlit.components.v1 as components
+from core import LISTA_TYPEROW, kategoria_typu, KOLORY_KATEGORII
 
 # Konfiguracja strony
 st.set_page_config(page_title="Mundial Typer 2026", page_icon="⚽", layout="centered")
@@ -129,6 +130,39 @@ def inject_custom_css():
 
 
 inject_custom_css()
+
+
+def rename_main_page_in_sidebar(new_label: str = "⚽️ Typowanie meczy"):
+    """Zmienia etykietę strony głównej (domyślnie 'app') na pasku bocznym.
+
+    Streamlit bierze nazwę strony głównej z nazwy pliku wejściowego (app.py → 'app').
+    Nie da się tego nadpisać przez API bez przebudowy na st.navigation, więc
+    podmieniamy tekst po stronie przeglądarki (wraz z MutationObserver, aby
+    przetrwało rerendery Streamlita)."""
+    components.html(
+        f"""
+        <script>
+        const NEW_LABEL = {new_label!r};
+        const rename = () => {{
+            const doc = window.parent.document;
+            const links = doc.querySelectorAll('[data-testid="stSidebarNav"] a');
+            links.forEach((a) => {{
+                a.querySelectorAll('span').forEach((s) => {{
+                    if (s.textContent.trim() === 'app') {{ s.textContent = NEW_LABEL; }}
+                }});
+            }});
+        }};
+        rename();
+        new MutationObserver(rename).observe(
+            window.parent.document.body, {{ childList: true, subtree: true }}
+        );
+        </script>
+        """,
+        height=0,
+    )
+
+
+rename_main_page_in_sidebar()
 
 # --- KONFIGURACJA EKIPY ---
 # Lista typerów jest teraz w core.py (jedyne źródło prawdy, współdzielone z podstronami).
@@ -652,6 +686,58 @@ else:
                     st.error(message)
 
 # --- SEKCJA 2: TABELA WYNIKÓW (LEADERBOARD) ---
+def render_podium(top3, me=None):
+    """Rysuje podium pierwszych trzech miejsc w stylu Kahoot.
+
+    top3: lista słowników z kluczami 'Gracz' i 'Punkty' (posortowana malejąco),
+    od 1 do 3 elementów. me: nick zalogowanego gracza (podświetlenie)."""
+    if not top3:
+        return
+    # Kolejność wyświetlania: 2. miejsce po lewej, 1. na środku, 3. po prawej.
+    uklad = [1, 0, 2]
+    wysokosci = {0: 168, 1: 120, 2: 92}
+    gradienty = {
+        0: "linear-gradient(180deg,#ffe27a 0%,#f5c518 55%,#c79a10)",
+        1: "linear-gradient(180deg,#e9eef5 0%,#c2cad6 55%,#9aa3b2)",
+        2: "linear-gradient(180deg,#e6a26a 0%,#cd7f32 55%,#a05a2c)",
+    }
+    medale = {0: "🥇", 1: "🥈", 2: "🥉"}
+    glow = {
+        0: "0 0 26px rgba(245,197,24,0.55)",
+        1: "0 0 22px rgba(180,200,230,0.40)",
+        2: "0 0 22px rgba(205,127,50,0.45)",
+    }
+
+    cells = ""
+    for poz in uklad:
+        if poz >= len(top3):
+            continue
+        r = top3[poz]
+        gracz = str(r["Gracz"])
+        pkt = int(r["Punkty"])
+        ramka = "2px solid #00e5ff" if (me is not None and gracz == me) else "1px solid rgba(255,255,255,0.28)"
+        cells += f"""
+        <div style="display:flex;flex-direction:column;align-items:center;justify-content:flex-end;flex:1;min-width:0;">
+            <div style="font-size:1.7rem;line-height:1;margin-bottom:6px;">{medale[poz]}</div>
+            <div style="font-family:'Rajdhani',sans-serif;font-weight:700;font-size:0.95rem;color:#e8eefc;
+                        text-align:center;margin-bottom:8px;white-space:nowrap;overflow:hidden;
+                        text-overflow:ellipsis;max-width:130px;">{gracz}</div>
+            <div style="width:100%;max-width:130px;height:{wysokosci[poz]}px;background:{gradienty[poz]};
+                        border:{ramka};border-bottom:none;border-radius:14px 14px 0 0;box-shadow:{glow[poz]};
+                        display:flex;flex-direction:column;align-items:center;justify-content:space-between;
+                        padding:12px 6px;">
+                <div style="font-family:'Orbitron',sans-serif;font-weight:900;font-size:2rem;color:#0a0e1a;">{poz + 1}</div>
+                <div style="font-family:'Orbitron',sans-serif;font-weight:700;font-size:1rem;color:#0a0e1a;">{pkt} pkt</div>
+            </div>
+        </div>"""
+
+    st.markdown(
+        f'<div style="display:flex;align-items:flex-end;gap:14px;max-width:560px;'
+        f'margin:8px auto 22px;">{cells}</div>',
+        unsafe_allow_html=True,
+    )
+
+
 st.header("📊 Tabela Punktowa")
 
 # Tworzymy bazową tabelę ze wszystkimi graczami (żeby każdy miał na start 0 punktów)
@@ -706,6 +792,13 @@ else:
         # Dodajemy kolumnę z pozycją (np. 1, 2, 3...)
         tabela_koncowa.index = tabela_koncowa.index + 1
         tabela_koncowa = tabela_koncowa.rename(columns={"name": "Gracz"})
+
+        # Podium pierwszych trzech miejsc (styl Kahoot)
+        if (tabela_koncowa["Punkty"] > 0).any():
+            render_podium(
+                tabela_koncowa.head(3).to_dict("records"),
+                me=st.session_state.logged_in_user,
+            )
 
         # Podświetlamy wiersz zalogowanego gracza
         def _podswietl_gracza(row):
@@ -762,15 +855,44 @@ else:
             return "0 ✗"
         
         df_user_typy["Punkty"] = df_user_typy.apply(calc_points_for_match, axis=1)
-        
+
+        # Kategoria trafienia (do kolorowania), tylko gdy znamy oficjalny wynik
+        def _kat_for_match(row):
+            if pd.isna(row['homeGoals']) or pd.isna(row['awayGoals']) or str(row['homeGoals']).strip() == "" or str(row['awayGoals']).strip() == "":
+                return ""
+            tg, tk = int(row['homeGoals']), int(row['awayGoals'])
+            wg, wk = int(row['pred_homeGoals']), int(row['pred_awayGoals'])
+            return kategoria_typu(tg, tk, wg, wk)
+
+        df_user_typy["_kat"] = df_user_typy.apply(_kat_for_match, axis=1)
+
         # Wybieramy i sortujemy kolumny
-        df_display = df_user_typy[["id", "Mecz", "Twój Typ", "Wynik", "Punkty"]].sort_values("id").reset_index(drop=True)
+        df_display = df_user_typy[["id", "Mecz", "Twój Typ", "Wynik", "Punkty", "_kat"]].sort_values("id").reset_index(drop=True)
         df_display.index = df_display.index + 1
-        
+        kat_col = df_display["_kat"]
+        df_show = df_display.drop(columns=["_kat"]).rename(columns={"id": "ID"})
+
+        # Kolorujemy komórki "Twój Typ" i "Punkty" wg trafienia (zielony/żółty/czerwony)
+        def _koloruj_twoje(_):
+            styles = pd.DataFrame("", index=df_show.index, columns=df_show.columns)
+            for i in df_show.index:
+                kolor = KOLORY_KATEGORII.get(kat_col.loc[i], "")
+                styles.loc[i, "Twój Typ"] = kolor
+                styles.loc[i, "Punkty"] = kolor
+            return styles
+
         st.dataframe(
-            df_display.rename(columns={"id": "ID"}),
+            df_show.style.apply(_koloruj_twoje, axis=None),
             use_container_width=True,
-            hide_index=False
+            hide_index=False,
+        )
+        st.markdown(
+            "<small>"
+            "<span style='background:rgba(34,197,94,0.45);padding:2px 8px;border-radius:6px;'>🟢 dokładny wynik (3 pkt)</span>&nbsp;&nbsp;"
+            "<span style='background:rgba(249,115,22,0.45);padding:2px 8px;border-radius:6px;'>🟠 trafiony rezultat (1 pkt)</span>&nbsp;&nbsp;"
+            "<span style='background:rgba(239,68,68,0.40);padding:2px 8px;border-radius:6px;'>🔴 pudło (0 pkt)</span>"
+            "</small>",
+            unsafe_allow_html=True,
         )
 
 
@@ -878,11 +1000,46 @@ else:
 
         # Typy graczy na ten mecz
         typy_meczu = df_typy[df_typy["id"] == mid] if not df_typy.empty else pd.DataFrame()
-        mapa_typow = {p["name"]: _format_wynik(p.get("homeGoals"), p.get("awayGoals"))
-                      for _, p in typy_meczu.iterrows()}
+        preds = {}
+        for _, p in typy_meczu.iterrows():
+            try:
+                preds[p["name"]] = (int(float(p["homeGoals"])), int(float(p["awayGoals"])))
+            except Exception:
+                pass
 
-        wiersze = [{"Gracz": g, "Typ": mapa_typow.get(g, "— brak typu")} for g in LISTA_TYPEROW]
-        st.dataframe(pd.DataFrame(wiersze), use_container_width=True, hide_index=True)
+        # Gdy mecz ma już oficjalny wynik, kolorujemy typy (zielony/żółty/czerwony)
+        if ma_wynik:
+            tg = int(float(aktualny.get("homeGoals")))
+            tk = int(float(aktualny.get("awayGoals")))
+
+        wiersze = []
+        kategorie = []
+        for g in LISTA_TYPEROW:
+            if g in preds:
+                wg, wk = preds[g]
+                typ_str = f"{wg}-{wk}"
+                kat = kategoria_typu(tg, tk, wg, wk) if ma_wynik else ""
+            else:
+                typ_str = "— brak typu"
+                kat = "brak" if ma_wynik else ""
+            wiersze.append({"Gracz": g, "Typ": typ_str})
+            kategorie.append({"Gracz": "", "Typ": kat})
+
+        df_akt = pd.DataFrame(wiersze)
+        if ma_wynik:
+            df_akt_styles = pd.DataFrame(kategorie).replace(KOLORY_KATEGORII)
+            styler = df_akt.style.apply(lambda _: df_akt_styles, axis=None)
+            st.dataframe(styler, use_container_width=True, hide_index=True)
+            st.markdown(
+                "<small>"
+                "<span style='background:rgba(34,197,94,0.45);padding:2px 8px;border-radius:6px;'>🟢 dokładny wynik (3 pkt)</span>&nbsp;&nbsp;"
+                "<span style='background:rgba(249,115,22,0.45);padding:2px 8px;border-radius:6px;'>🟠 trafiony rezultat (1 pkt)</span>&nbsp;&nbsp;"
+                "<span style='background:rgba(239,68,68,0.40);padding:2px 8px;border-radius:6px;'>🔴 pudło (0 pkt)</span>"
+                "</small>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.dataframe(df_akt, use_container_width=True, hide_index=True)
         st.caption("Tabela przełączy się automatycznie na kolejny mecz, gdy ten się rozpocznie.")
 
 
@@ -934,14 +1091,7 @@ else:
         df_roz = pd.DataFrame(wiersze)
         df_kat = pd.DataFrame(kategorie)
 
-        kolory = {
-            "dokladny":  "background-color: rgba(34,197,94,0.45); color:#eafff1; font-weight:600;",
-            "zwyciezca": "background-color: rgba(249,115,22,0.45); color:#fff4e8; font-weight:600;",
-            "pudlo":     "background-color: rgba(239,68,68,0.40); color:#ffecec;",
-            "brak":      "color:#6b7280;",
-            "":          "",
-        }
-        df_styles = df_kat.replace(kolory)
+        df_styles = df_kat.replace(KOLORY_KATEGORII)
 
         styler = df_roz.style.apply(lambda _: df_styles, axis=None)
         st.dataframe(styler, use_container_width=True, hide_index=True)

@@ -2,6 +2,7 @@
 
 import streamlit as st
 import pandas as pd
+import altair as alt
 
 from core import (
     inject_custom_css, require_login, load_data, LISTA_TYPEROW,
@@ -91,6 +92,30 @@ st.subheader("📊 Punkty według graczy")
 st.bar_chart(df_stat.set_index("Gracz")["Punkty"])
 
 st.subheader("📈 Skumulowane punkty w czasie")
-df_kum = pd.DataFrame(kumulacja, index=etykiety)
-st.line_chart(df_kum)
-st.caption("Oś X: kolejne rozegrane mecze (chronologicznie). Każda linia to jeden gracz.")
+# Format długi + jawna kolejność meczów na osi X — dzięki temu linie nie "skaczą"
+# (st.line_chart sortował etykiety tekstowo: "1.", "10.", "2."...), tylko rosną
+# monotonicznie wraz z kolejnymi rozegranymi meczami.
+rekordy = []
+for i, etk in enumerate(etykiety):
+    for g in LISTA_TYPEROW:
+        rekordy.append({
+            "Kolejność": i + 1,
+            "Mecz": etk,
+            "Gracz": g,
+            "Punkty": kumulacja[g][i],
+        })
+df_long = pd.DataFrame(rekordy)
+
+wykres = (
+    alt.Chart(df_long)
+    .mark_line(point=True, interpolate="monotone")
+    .encode(
+        x=alt.X("Kolejność:O", title="Kolejny rozegrany mecz", sort=None),
+        y=alt.Y("Punkty:Q", title="Skumulowane punkty"),
+        color=alt.Color("Gracz:N", title="Gracz"),
+        tooltip=["Gracz:N", "Mecz:N", "Punkty:Q"],
+    )
+    .properties(height=380)
+)
+st.altair_chart(wykres, use_container_width=True)
+st.caption("Oś X: kolejne rozegrane mecze (chronologicznie). Każda linia to jeden gracz — punkty narastają z meczu na mecz.")

@@ -181,6 +181,16 @@ def kategoria_typu(tg, tk, wg, wk):
     return {3: "dokladny", 1: "zwyciezca", 0: "pudlo"}[pkt]
 
 
+# Wspólna mapa stylów dla kategorii trafień (używana w tabelach z kolorami).
+KOLORY_KATEGORII = {
+    "dokladny":  "background-color: rgba(34,197,94,0.45); color:#eafff1; font-weight:600;",
+    "zwyciezca": "background-color: rgba(249,115,22,0.45); color:#fff4e8; font-weight:600;",
+    "pudlo":     "background-color: rgba(239,68,68,0.40); color:#ffecec;",
+    "brak":      "color:#6b7280;",
+    "":          "",
+}
+
+
 # --- Strażnik logowania dla podstron ---
 def require_login():
     """Zatrzymuje renderowanie podstrony, jeśli użytkownik nie jest zalogowany."""
